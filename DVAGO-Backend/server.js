@@ -21,9 +21,10 @@ app.use("/api/dashboard", require("./routes/dashboardRoutes"));
 app.use("/api/analytics", require("./routes/analyticsRoutes"));
 app.use("/api/user", require("./routes/userRoutes"));
 app.use("/api/scan", require("./routes/scanRoutes"));
+app.use("/api/doses", require("./routes/doseRoutes"));
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
