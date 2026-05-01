@@ -40,6 +40,7 @@ const addMedicine = async (req, res) => {
     });
 
     let createdReminders = [];
+    let createdDoseLogs = [];
 
     if (validTimes.length > 0) {
       const startDate = new Date();
@@ -98,7 +99,7 @@ const addMedicine = async (req, res) => {
         }
 
         if (doseLogs.length > 0) {
-          await DoseLog.insertMany(doseLogs);
+          createdDoseLogs = await DoseLog.insertMany(doseLogs);
         }
       }
     }
@@ -106,6 +107,10 @@ const addMedicine = async (req, res) => {
     res.status(201).json({
       message: "Medicine added successfully",
       medicine,
+      doseSchedules: createdDoseLogs.map((doseLog) => ({
+        id: doseLog._id,
+        scheduledAt: doseLog.scheduledAt,
+      })),
     });
   } catch (error) {
     res.status(500).json({

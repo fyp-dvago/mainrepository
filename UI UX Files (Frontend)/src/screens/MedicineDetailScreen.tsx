@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   View,
   Text,
@@ -6,23 +6,191 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
+import api from '../services/apiClient';
+import {cancelDoseReminderNotification} from '../services/notificationService';
+
+type MedicineDetail = {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  stock: number;
+  nextDose: string | null;
+  color: string;
+  category: string;
+  instructions: string;
+  isActive: boolean;
+};
+
+type ScheduleItem = {
+  id?: string;
+  time: string;
+  status: string;
+  date: string;
+};
+
+type HistoryItem = {
+  id?: string;
+  date: string;
+  time: string;
+  status: string;
+  onTime: boolean;
+};
+
+const frequencyLabels: Record<string, string> = {
+  once: 'Once daily',
+  twice: 'Twice daily',
+  thrice: 'Thrice daily',
+  four: '4 times daily',
+};
+
+const mapMedicine = (medicine: any, fallback: any): MedicineDetail => ({
+  id: medicine?._id || medicine?.id || fallback?.id || fallback?._id,
+  name: medicine?.name || fallback?.name || '',
+  dosage: medicine?.dosage || fallback?.dosage || '',
+  frequency:
+    frequencyLabels[medicine?.frequency || fallback?.frequency] ||
+    medicine?.frequency ||
+    fallback?.frequency ||
+    'Once daily',
+  stock: Number(medicine?.stock ?? fallback?.stock ?? 0),
+  nextDose: medicine?.nextDose || fallback?.nextDose || null,
+  color: medicine?.color || fallback?.color || '#74BA1E',
+  category: medicine?.category || fallback?.category || 'Medicine',
+  instructions:
+    medicine?.instructions ||
+    fallback?.instructions ||
+    'No instructions provided.',
+  isActive: medicine?.isActive ?? fallback?.isActive ?? true,
+});
+
+const mapHistoryItem = (item: any): HistoryItem => ({
+  ...item,
+  id: item?._id || item?.id || item?.doseId,
+  status: String(item?.status || '').toLowerCase(),
+  onTime: Boolean(item?.onTime),
+});
 
 const MedicineDetailScreen = ({navigation, route}: any) => {
-  const medicine = route.params?.medicine || {
-    id: '1',
-    name: 'Paracetamol',
-    dosage: '500mg',
-    frequency: 'Twice daily',
-    stock: 20,
-    nextDose: '6:00 PM',
-    color: '#3B82F6',
-    category: 'Pain Relief',
+  const routeMedicine = route.params?.medicine;
+  const medicineId = routeMedicine?.id || routeMedicine?._id;
+  const [medicine, setMedicine] = useState<MedicineDetail | null>(
+    routeMedicine ? mapMedicine(routeMedicine, routeMedicine) : null,
+  );
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [markingHistoryDoseId, setMarkingHistoryDoseId] = useState<string | null>(
+    null,
+  );
+
+  const loadMedicineDetails = useCallback(async (showLoading = true) => {
+    if (!medicineId) {
+      setLoading(false);
+      setMedicine(null);
+      return;
+    }
+
+    try {
+      if (showLoading) {
+        setLoading(true);
+      }
+      setError('');
+
+      const response = await api.get(`/medicines/${medicineId}/details`);
+
+      setMedicine(mapMedicine(response.data?.medicine, routeMedicine));
+      setSchedule(
+        Array.isArray(response.data?.schedule) ? response.data.schedule : [],
+      );
+      setHistory(
+        Array.isArray(response.data?.history)
+          ? response.data.history.map(mapHistoryItem)
+          : [],
+      );
+    } catch (requestError: any) {
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          'Unable to load medicine details',
+      );
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  }, [medicineId, routeMedicine]);
+
+  useEffect(() => {
+    loadMedicineDetails();
+  }, [loadMedicineDetails]);
+
+  const handleUpdateStatus = async () => {
+    if (!medicine?.id) {
+      return;
+    }
+
+    try {
+      setUpdating(true);
+
+      const response = await api.put(`/medicines/${medicine.id}`, {
+        isActive: !medicine.isActive,
+      });
+
+      setMedicine(previous =>
+        previous
+          ? mapMedicine(response.data?.medicine, {
+              ...previous,
+              isActive: !previous.isActive,
+            })
+          : previous,
+      );
+    } catch (updateError: any) {
+      Alert.alert(
+        'Error',
+        updateError?.response?.data?.message ||
+          updateError?.message ||
+          'Unable to update medicine',
+      );
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleMarkHistoryTaken = async (doseId?: string) => {
+    if (!doseId) {
+      return;
+    }
+
+    try {
+      setMarkingHistoryDoseId(doseId);
+      await api.post(`/doses/${doseId}/taken`);
+      await cancelDoseReminderNotification(doseId);
+      await loadMedicineDetails(false);
+    } catch (markError: any) {
+      Alert.alert(
+        'Error',
+        markError?.response?.data?.message ||
+          markError?.message ||
+          'Unable to mark dose as taken',
+      );
+    } finally {
+      setMarkingHistoryDoseId(null);
+    }
   };
 
   const handleDelete = () => {
+    if (!medicine?.id) {
+      return;
+    }
+
     Alert.alert(
       'Delete Medicine',
       `Are you sure you want to delete ${medicine.name}?`,
@@ -31,30 +199,63 @@ const MedicineDetailScreen = ({navigation, route}: any) => {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => navigation.goBack(),
+          onPress: async () => {
+            try {
+              setDeleting(true);
+              await api.delete(`/medicines/${medicine.id}`);
+              navigation.goBack();
+            } catch (deleteError: any) {
+              Alert.alert(
+                'Error',
+                deleteError?.response?.data?.message ||
+                  deleteError?.message ||
+                  'Unable to delete medicine',
+              );
+            } finally {
+              setDeleting(false);
+            }
+          },
         },
       ],
     );
   };
 
-  const schedule = [
-    {time: '09:00 AM', status: 'taken', date: 'Today'},
-    {time: '06:00 PM', status: 'upcoming', date: 'Today'},
-    {time: '09:00 AM', status: 'pending', date: 'Tomorrow'},
-    {time: '06:00 PM', status: 'pending', date: 'Tomorrow'},
-  ];
+  if (loading) {
+    return (
+      <View style={styles.stateContainer}>
+        <ActivityIndicator size="large" color="#74BA1E" />
+        <Text style={styles.stateText}>Loading medicine details...</Text>
+      </View>
+    );
+  }
 
-  const history = [
-    {date: 'Dec 20, 2025', time: '09:00 AM', status: 'taken', onTime: true},
-    {date: 'Dec 20, 2025', time: '06:00 PM', status: 'taken', onTime: true},
-    {date: 'Dec 19, 2025', time: '09:00 AM', status: 'taken', onTime: false},
-    {date: 'Dec 19, 2025', time: '06:00 PM', status: 'taken', onTime: true},
-    {date: 'Dec 18, 2025', time: '09:00 AM', status: 'missed', onTime: false},
-  ];
+  if (error) {
+    return (
+      <View style={styles.stateContainer}>
+        <Icon name="alert-circle-outline" size={64} color="#EF4444" />
+        <Text style={styles.emptyText}>Could not load medicine</Text>
+        <Text style={styles.emptySubtext}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadMedicineDetails}>
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (!medicine) {
+    return (
+      <View style={styles.stateContainer}>
+        <Icon name="pill-off" size={64} color="#E5E7EB" />
+        <Text style={styles.emptyText}>Medicine not found</Text>
+        <Text style={styles.emptySubtext}>
+          Go back and select a medicine again.
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Header Card */}
       <LinearGradient
         colors={[medicine.color, `${medicine.color}DD`]}
         style={styles.header}>
@@ -71,7 +272,6 @@ const MedicineDetailScreen = ({navigation, route}: any) => {
       </LinearGradient>
 
       <View style={styles.content}>
-        {/* Quick Info */}
         <View style={styles.infoGrid}>
           <View style={styles.infoCard}>
             <Icon name="clock-outline" size={24} color="#74BA1E" />
@@ -86,136 +286,187 @@ const MedicineDetailScreen = ({navigation, route}: any) => {
           <View style={styles.infoCard}>
             <Icon name="bell-outline" size={24} color="#F59E0B" />
             <Text style={styles.infoLabel}>Next Dose</Text>
-            <Text style={styles.infoValue}>{medicine.nextDose}</Text>
-          </View>
-        </View>
-
-        {/* Upcoming Schedule */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
-          {schedule.map((item, index) => (
-            <View key={index} style={styles.scheduleItem}>
-              <View
-                style={[
-                  styles.scheduleIcon,
-                  {
-                    backgroundColor:
-                      item.status === 'taken'
-                        ? '#DCFCE7'
-                        : item.status === 'upcoming'
-                        ? '#FEF3C7'
-                        : '#F3F4F6',
-                  },
-                ]}>
-                <Icon
-                  name={
-                    item.status === 'taken'
-                      ? 'check-circle'
-                      : item.status === 'upcoming'
-                      ? 'clock'
-                      : 'calendar'
-                  }
-                  size={24}
-                  color={
-                    item.status === 'taken'
-                      ? '#10B981'
-                      : item.status === 'upcoming'
-                      ? '#F59E0B'
-                      : '#9CA3AF'
-                  }
-                />
-              </View>
-              <View style={styles.scheduleContent}>
-                <Text style={styles.scheduleTime}>{item.time}</Text>
-                <Text style={styles.scheduleDate}>{item.date}</Text>
-              </View>
-              {item.status === 'taken' && (
-                <Icon name="check" size={24} color="#10B981" />
-              )}
-            </View>
-          ))}
-        </View>
-
-        {/* History */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>History</Text>
-          {history.map((item, index) => (
-            <View key={index} style={styles.historyItem}>
-              <View style={styles.historyLeft}>
-                <View
-                  style={[
-                    styles.historyDot,
-                    {
-                      backgroundColor:
-                        item.status === 'taken' ? '#74BA1E' : '#EF4444',
-                    },
-                  ]}
-                />
-                <View style={styles.historyContent}>
-                  <Text style={styles.historyDate}>{item.date}</Text>
-                  <Text style={styles.historyTime}>{item.time}</Text>
-                </View>
-              </View>
-              <View style={styles.historyRight}>
-                {item.status === 'taken' ? (
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      {
-                        backgroundColor: item.onTime
-                          ? '#DCFCE7'
-                          : '#FEF3C7',
-                      },
-                    ]}>
-                    <Text
-                      style={[
-                        styles.statusText,
-                        {
-                          color: item.onTime ? '#10B981' : '#F59E0B',
-                        },
-                      ]}>
-                      {item.onTime ? 'On Time' : 'Late'}
-                    </Text>
-                  </View>
-                ) : (
-                  <View
-                    style={[
-                      styles.statusBadge,
-                      {backgroundColor: '#FEE2E2'},
-                    ]}>
-                    <Text style={[styles.statusText, {color: '#EF4444'}]}>
-                      Missed
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          ))}
-        </View>
-
-        {/* Instructions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Instructions</Text>
-          <View style={styles.instructionCard}>
-            <Icon name="information-outline" size={24} color="#3B82F6" />
-            <Text style={styles.instructionText}>
-              Take with food. Avoid alcohol while taking this medication.
-              Consult your doctor if symptoms persist.
+            <Text style={styles.infoValue}>
+              {medicine.nextDose || 'No reminder'}
             </Text>
           </View>
         </View>
 
-        {/* Actions */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Upcoming Schedule</Text>
+          {schedule.length === 0 ? (
+            <View style={styles.emptySection}>
+              <Text style={styles.emptySectionText}>No upcoming doses</Text>
+            </View>
+          ) : (
+            schedule.map((item, index) => (
+              <View key={item.id || index} style={styles.scheduleItem}>
+                <View
+                  style={[
+                    styles.scheduleIcon,
+                    {
+                      backgroundColor:
+                        item.status === 'taken'
+                          ? '#DCFCE7'
+                          : item.status === 'upcoming'
+                          ? '#FEF3C7'
+                          : '#F3F4F6',
+                    },
+                  ]}>
+                  <Icon
+                    name={
+                      item.status === 'taken'
+                        ? 'check-circle'
+                        : item.status === 'upcoming'
+                        ? 'clock'
+                        : 'calendar'
+                    }
+                    size={24}
+                    color={
+                      item.status === 'taken'
+                        ? '#10B981'
+                        : item.status === 'upcoming'
+                        ? '#F59E0B'
+                        : '#9CA3AF'
+                    }
+                  />
+                </View>
+                <View style={styles.scheduleContent}>
+                  <Text style={styles.scheduleTime}>{item.time}</Text>
+                  <Text style={styles.scheduleDate}>{item.date}</Text>
+                </View>
+                {item.status === 'taken' && (
+                  <Icon name="check" size={24} color="#10B981" />
+                )}
+              </View>
+            ))
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>History</Text>
+          {history.length === 0 ? (
+            <View style={styles.emptySection}>
+              <Text style={styles.emptySectionText}>No dose history yet</Text>
+            </View>
+          ) : (
+            history.map((item, index) => {
+              const canMarkTaken =
+                item.status === 'missed' ||
+                (item.status !== 'taken' && item.onTime === false);
+              const isMarking = markingHistoryDoseId === item.id;
+
+              return (
+                <View key={item.id || index} style={styles.historyItem}>
+                  <View style={styles.historyLeft}>
+                    <View
+                      style={[
+                        styles.historyDot,
+                        {
+                          backgroundColor:
+                            item.status === 'taken' ? '#74BA1E' : '#EF4444',
+                        },
+                      ]}
+                    />
+                    <View style={styles.historyContent}>
+                      <Text style={styles.historyDate}>{item.date}</Text>
+                      <Text style={styles.historyTime}>{item.time}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.historyRight}>
+                    {item.status === 'taken' ? (
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          {
+                            backgroundColor: item.onTime
+                              ? '#DCFCE7'
+                              : '#FEF3C7',
+                          },
+                        ]}>
+                        <Text
+                          style={[
+                            styles.statusText,
+                            {
+                              color: item.onTime ? '#10B981' : '#F59E0B',
+                            },
+                          ]}>
+                          {item.onTime ? 'On Time' : 'Late'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.historyActionColumn}>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            {backgroundColor: '#FEE2E2'},
+                          ]}>
+                          <Text style={[styles.statusText, {color: '#EF4444'}]}>
+                            Missed
+                          </Text>
+                        </View>
+                        {canMarkTaken && (
+                          <TouchableOpacity
+                            style={[
+                              styles.markTakenButton,
+                              (!item.id || isMarking) && styles.disabledButton,
+                            ]}
+                            onPress={() => handleMarkHistoryTaken(item.id)}
+                            disabled={!item.id || isMarking}>
+                            {isMarking ? (
+                              <ActivityIndicator size="small" color="#000000" />
+                            ) : (
+                              <Text style={styles.markTakenButtonText}>
+                                {item.id ? 'Mark as Taken' : 'No dose ID'}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Instructions</Text>
+          <View style={styles.instructionCard}>
+            <Icon name="information-outline" size={24} color="#3B82F6" />
+            <Text style={styles.instructionText}>{medicine.instructions}</Text>
+          </View>
+        </View>
+
         <View style={styles.actionsContainer}>
-          <TouchableOpacity style={styles.editButton}>
-            <Icon name="pencil" size={20} color="#FFFFFF" />
-            <Text style={styles.editButtonText}>Edit</Text>
+          <TouchableOpacity
+            style={[styles.editButton, updating && styles.disabledButton]}
+            onPress={handleUpdateStatus}
+            disabled={updating || deleting}>
+            {updating ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Icon name="pencil" size={20} color="#FFFFFF" />
+                <Text style={styles.editButtonText}>
+                  {medicine.isActive ? 'Deactivate' : 'Activate'}
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={handleDelete}>
-            <Icon name="delete" size={20} color="#EF4444" />
-            <Text style={styles.deleteButtonText}>Delete</Text>
+            style={[styles.deleteButton, deleting && styles.disabledButton]}
+            onPress={handleDelete}
+            disabled={updating || deleting}>
+            {deleting ? (
+              <ActivityIndicator color="#EF4444" />
+            ) : (
+              <>
+                <Icon name="delete" size={20} color="#EF4444" />
+                <Text style={styles.deleteButtonText}>Delete</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -227,6 +478,42 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
+  },
+  stateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F9FAFB',
+    padding: 20,
+  },
+  stateText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 12,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#74BA1E',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   header: {
     paddingTop: 40,
@@ -310,6 +597,16 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     marginBottom: 16,
   },
+  emptySection: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  emptySectionText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
   scheduleItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -384,6 +681,7 @@ const styles = StyleSheet.create({
   },
   historyRight: {
     marginLeft: 12,
+    alignItems: 'flex-end',
   },
   statusBadge: {
     paddingHorizontal: 12,
@@ -393,6 +691,25 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  historyActionColumn: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  markTakenButton: {
+    backgroundColor: '#74BA1E',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    minHeight: 32,
+    minWidth: 104,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markTakenButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   instructionCard: {
     flexDirection: 'row',
@@ -421,6 +738,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 16,
     gap: 8,
+  },
+  disabledButton: {
+    opacity: 0.7,
   },
   editButtonText: {
     fontSize: 16,

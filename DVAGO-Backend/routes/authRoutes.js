@@ -5,12 +5,14 @@ const {
   registerUser,
   loginUser,
   getProfile,
+  firebaseAuth,
 } = require('../controllers/authController');
 
 const { protect } = require('../middleware/authMiddleware');
 
 router.post('/register', registerUser);
 router.post('/login', loginUser);
+router.post('/firebase', firebaseAuth);
 router.get('/profile', protect, getProfile);
 
 module.exports = router;

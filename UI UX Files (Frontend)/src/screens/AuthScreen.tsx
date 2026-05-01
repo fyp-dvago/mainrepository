@@ -14,8 +14,9 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 import {
-  loginUser,
-  registerUser,
+  loginWithFirebaseEmail,
+  loginWithGoogle,
+  registerWithFirebaseEmail,
   saveAuthData,
 } from '../services/authService';
 
@@ -61,9 +62,13 @@ const AuthScreen = ({navigation}: any) => {
       let response;
 
       if (isLogin) {
-        response = await loginUser(email.trim(), password);
+        response = await loginWithFirebaseEmail(email.trim(), password);
       } else {
-        response = await registerUser(name.trim(), email.trim(), password);
+        response = await registerWithFirebaseEmail(
+          name.trim(),
+          email.trim(),
+          password,
+        );
       }
 
       if (response?.success) {
@@ -78,6 +83,30 @@ const AuthScreen = ({navigation}: any) => {
         error?.response?.data?.message ||
         error?.message ||
         'Something went wrong. Please try again.';
+
+      Alert.alert('Error', errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+
+      const response = await loginWithGoogle();
+
+      if (response?.success) {
+        await saveAuthData(response.token, response.user);
+        navigation.replace('MainTabs');
+      } else {
+        Alert.alert('Error', response?.message || 'Google login failed');
+      }
+    } catch (error: any) {
+      const errorMessage =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Google login failed. Please try again.';
 
       Alert.alert('Error', errorMessage);
     } finally {
@@ -106,7 +135,8 @@ const AuthScreen = ({navigation}: any) => {
           <View style={styles.tabContainer}>
             <TouchableOpacity
               style={[styles.tab, isLogin && styles.activeTab]}
-              onPress={() => setIsLogin(true)}>
+              onPress={() => setIsLogin(true)}
+              disabled={loading}>
               <Text style={[styles.tabText, isLogin && styles.activeTabText]}>
                 Login
               </Text>
@@ -114,7 +144,8 @@ const AuthScreen = ({navigation}: any) => {
 
             <TouchableOpacity
               style={[styles.tab, !isLogin && styles.activeTab]}
-              onPress={() => setIsLogin(false)}>
+              onPress={() => setIsLogin(false)}
+              disabled={loading}>
               <Text style={[styles.tabText, !isLogin && styles.activeTabText]}>
                 Sign Up
               </Text>
@@ -135,6 +166,7 @@ const AuthScreen = ({navigation}: any) => {
                 placeholderTextColor="#9CA3AF"
                 value={name}
                 onChangeText={setName}
+                editable={!loading}
               />
             </View>
           )}
@@ -155,6 +187,7 @@ const AuthScreen = ({navigation}: any) => {
               autoCorrect={false}
               value={email}
               onChangeText={setEmail}
+              editable={!loading}
             />
           </View>
 
@@ -172,6 +205,7 @@ const AuthScreen = ({navigation}: any) => {
               secureTextEntry={!showPassword}
               value={password}
               onChangeText={setPassword}
+              editable={!loading}
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
@@ -213,17 +247,18 @@ const AuthScreen = ({navigation}: any) => {
             <View style={styles.dividerLine} />
           </View>
 
-          <View style={styles.socialButtons}>
-            <TouchableOpacity style={styles.socialButton}>
-              <Icon name="google" size={24} color="#DB4437" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.socialButton}>
-              <Icon name="facebook" size={24} color="#4267B2" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.socialButton}>
-              <Icon name="apple" size={24} color="#000000" />
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.googleButton, loading && styles.disabledButton]}
+            onPress={handleGoogleLogin}
+            disabled={loading}>
+            <Text style={styles.googleButtonText}>Continue with Google</Text>
+            <Icon
+              name="google"
+              size={22}
+              color="#DB4437"
+              style={styles.googleIcon}
+            />
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -354,20 +389,23 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     marginHorizontal: 16,
   },
-  socialButtons: {
+  googleButton: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  socialButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#F9FAFB',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
+  googleButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  googleIcon: {
+    marginLeft: 8,
   },
 });
 

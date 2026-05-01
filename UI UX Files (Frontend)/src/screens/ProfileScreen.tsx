@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,34 @@ import {
   Switch,
   Alert,
   ActivityIndicator,
+  Modal,
+  TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
-import {clearAuthData, getProfile, getStoredUser} from '../services/authService';
+import {clearAuthData, getStoredUser} from '../services/authService';
+import api from '../services/apiClient';
+import {cancelMedicineReminderNotifications} from '../services/notificationService';
+
+type ProfileStats = {
+  medicines: number;
+  adherence: number;
+  daysActive: number;
+};
+
+type NotificationSettings = {
+  pushEnabled: boolean;
+  soundEnabled: boolean;
+  vibrationEnabled: boolean;
+  voiceEnabled: boolean;
+};
+
+const defaultNotifications: NotificationSettings = {
+  pushEnabled: true,
+  soundEnabled: true,
+  vibrationEnabled: true,
+  voiceEnabled: false,
+};
 
 const ProfileScreen = ({navigation}: any) => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -20,35 +44,170 @@ const ProfileScreen = ({navigation}: any) => {
   const [voiceEnabled, setVoiceEnabled] = useState(false);
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [stats, setStats] = useState<ProfileStats>({
+    medicines: 0,
+    adherence: 0,
+    daysActive: 0,
+  });
+  const [loadError, setLoadError] = useState('');
+  const [saveMessage, setSaveMessage] = useState('');
+  const [isEditVisible, setIsEditVisible] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formEmail, setFormEmail] = useState('');
+  const [formError, setFormError] = useState('');
 
-  useEffect(() => {
-    loadProfile();
+  const applyNotifications = useCallback((notifications?: Partial<NotificationSettings>) => {
+    const next = {
+      ...defaultNotifications,
+      ...notifications,
+    };
+
+    setNotificationsEnabled(next.pushEnabled);
+    setSoundEnabled(next.soundEnabled);
+    setVibrationEnabled(next.vibrationEnabled);
+    setVoiceEnabled(next.voiceEnabled);
   }, []);
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError('');
 
       const storedUser = await getStoredUser();
       if (storedUser) {
         setUser(storedUser);
       }
 
-      const response = await getProfile();
+      const response = await api.get('/user/profile');
 
-      if (response?.success && response?.user) {
-        setUser(response.user);
-
-        setNotificationsEnabled(response.user?.notifications?.pushEnabled ?? true);
-        setSoundEnabled(response.user?.notifications?.soundEnabled ?? true);
-        setVibrationEnabled(response.user?.notifications?.vibrationEnabled ?? true);
-        setVoiceEnabled(response.user?.notifications?.voiceEnabled ?? false);
+      if (response?.data?.user) {
+        setUser(response.data.user);
       }
+
+      if (response?.data?.stats) {
+        setStats({
+          medicines: Number(response.data.stats.medicines || 0),
+          adherence: Number(response.data.stats.adherence || 0),
+          daysActive: Number(response.data.stats.daysActive || 0),
+        });
+      }
+
+      applyNotifications(response?.data?.settings?.notifications);
     } catch (error: any) {
-      console.log('Profile load error:', error?.response?.data || error?.message);
+      setLoadError(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to load profile',
+      );
     } finally {
       setLoading(false);
+    }
+  }, [applyNotifications]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener?.('focus', loadProfile);
+    loadProfile();
+
+    return unsubscribe;
+  }, [loadProfile, navigation]);
+
+  const getCurrentNotifications = (
+    overrides: Partial<NotificationSettings> = {},
+  ): NotificationSettings => ({
+    pushEnabled: notificationsEnabled,
+    soundEnabled,
+    vibrationEnabled,
+    voiceEnabled,
+    ...overrides,
+  });
+
+  const saveNotificationSettings = async (
+    nextNotifications: NotificationSettings,
+  ) => {
+    try {
+      setSaving(true);
+      setSaveMessage('');
+
+      await api.put('/user/settings', {
+        notifications: nextNotifications,
+      });
+
+      if (!nextNotifications.pushEnabled) {
+        await cancelMedicineReminderNotifications();
+      }
+
+      setSaveMessage('Settings saved');
+    } catch (error: any) {
+      Alert.alert(
+        'Error',
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to save settings',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateNotificationSetting = async (
+    key: keyof NotificationSettings,
+    value: boolean,
+  ) => {
+    const nextNotifications = getCurrentNotifications({[key]: value});
+
+    setNotificationsEnabled(nextNotifications.pushEnabled);
+    setSoundEnabled(nextNotifications.soundEnabled);
+    setVibrationEnabled(nextNotifications.vibrationEnabled);
+    setVoiceEnabled(nextNotifications.voiceEnabled);
+
+    await saveNotificationSettings(nextNotifications);
+  };
+
+  const handleOpenEditProfile = () => {
+    setFormName(user?.name || '');
+    setFormEmail(user?.email || '');
+    setFormError('');
+    setSaveMessage('');
+    setIsEditVisible(true);
+  };
+
+  const handleSaveProfile = async () => {
+    const nextName = formName.trim();
+    const nextEmail = formEmail.trim();
+
+    if (!nextName) {
+      setFormError('Name is required');
+      return;
+    }
+
+    if (!nextEmail) {
+      setFormError('Email is required');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setSaveMessage('');
+      setFormError('');
+
+      await api.put('/user/profile', {
+        name: nextName,
+        email: nextEmail,
+      });
+
+      await loadProfile();
+      setIsEditVisible(false);
+      setSaveMessage('Profile saved');
+    } catch (error: any) {
+      setFormError(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to save profile',
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -72,24 +231,28 @@ const ProfileScreen = ({navigation}: any) => {
       title: 'Personal Information',
       subtitle: 'Update your profile details',
       color: '#74BA1E',
+      onPress: () => navigation.navigate('PersonalInformation'),
     },
     {
       icon: 'hospital-box',
       title: 'Medical History',
       subtitle: 'View your medical records',
       color: '#3B82F6',
+      onPress: () => navigation.navigate('MedicalHistory'),
     },
     {
       icon: 'card-account-details',
       title: 'Prescriptions',
       subtitle: 'Manage your prescriptions',
       color: '#8B5CF6',
+      onPress: () => Alert.alert('Coming soon', 'Prescriptions will be available soon.'),
     },
     {
       icon: 'doctor',
       title: 'My Doctors',
       subtitle: 'Healthcare providers',
       color: '#EC4899',
+      onPress: () => Alert.alert('Coming soon', 'My Doctors will be available soon.'),
     },
   ];
 
@@ -102,6 +265,19 @@ const ProfileScreen = ({navigation}: any) => {
     );
   }
 
+  if (loadError && !user) {
+    return (
+      <View style={styles.loaderContainer}>
+        <Icon name="alert-circle-outline" size={64} color="#EF4444" />
+        <Text style={styles.errorTitle}>Could not load profile</Text>
+        <Text style={styles.errorText}>{loadError}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={loadProfile}>
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <LinearGradient colors={['#74BA1E', '#5A9618']} style={styles.header}>
@@ -110,25 +286,106 @@ const ProfileScreen = ({navigation}: any) => {
         </View>
         <Text style={styles.userName}>{user?.name || 'User'}</Text>
         <Text style={styles.userEmail}>{user?.email || 'No email available'}</Text>
-        <TouchableOpacity style={styles.editButton}>
+        <TouchableOpacity
+          style={[styles.editButton, saving && styles.disabledButton]}
+          onPress={handleOpenEditProfile}
+          disabled={saving}>
           <Text style={styles.editButtonText}>Edit Profile</Text>
           <Icon name="pencil" size={16} color="#74BA1E" />
         </TouchableOpacity>
       </LinearGradient>
 
+      <Modal
+        visible={isEditVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !saving && setIsEditVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+              <TouchableOpacity
+                onPress={() => setIsEditVisible(false)}
+                disabled={saving}>
+                <Icon name="close" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {!!formError && (
+              <View style={styles.modalErrorCard}>
+                <Text style={styles.modalErrorText}>{formError}</Text>
+              </View>
+            )}
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Name</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formName}
+                onChangeText={setFormName}
+                placeholder="Enter your name"
+                editable={!saving}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <TextInput
+                style={styles.textInput}
+                value={formEmail}
+                onChangeText={setFormEmail}
+                placeholder="Enter your email"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                editable={!saving}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setIsEditVisible(false)}
+                disabled={saving}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && styles.disabledButton]}
+                onPress={handleSaveProfile}
+                disabled={saving}>
+                <Text style={styles.saveButtonText}>
+                  {saving ? 'Saving...' : 'Save'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {!!loadError && (
+        <View style={styles.statusCardError}>
+          <Text style={styles.statusTextError}>{loadError}</Text>
+        </View>
+      )}
+
+      {!!saveMessage && (
+        <View style={styles.statusCardSuccess}>
+          <Text style={styles.statusTextSuccess}>{saveMessage}</Text>
+        </View>
+      )}
+
       <View style={styles.statsContainer}>
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>8</Text>
+          <Text style={styles.statValue}>{stats.medicines}</Text>
           <Text style={styles.statLabel}>Medicines</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>92%</Text>
+          <Text style={styles.statValue}>{stats.adherence}%</Text>
           <Text style={styles.statLabel}>Adherence</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>45</Text>
+          <Text style={styles.statValue}>{stats.daysActive}</Text>
           <Text style={styles.statLabel}>Days Active</Text>
         </View>
       </View>
@@ -136,7 +393,10 @@ const ProfileScreen = ({navigation}: any) => {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Health Profile</Text>
         {menuItems.map((item, index) => (
-          <TouchableOpacity key={index} style={styles.menuItem}>
+          <TouchableOpacity
+            key={index}
+            style={styles.menuItem}
+            onPress={item.onPress}>
             <View
               style={[
                 styles.menuIcon,
@@ -168,9 +428,12 @@ const ProfileScreen = ({navigation}: any) => {
           </View>
           <Switch
             value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
+            onValueChange={value =>
+              updateNotificationSetting('pushEnabled', value)
+            }
             trackColor={{false: '#D1D5DB', true: '#74BA1E'}}
             thumbColor="#FFFFFF"
+            disabled={saving}
           />
         </View>
 
@@ -184,10 +447,12 @@ const ProfileScreen = ({navigation}: any) => {
           </View>
           <Switch
             value={soundEnabled}
-            onValueChange={setSoundEnabled}
+            onValueChange={value =>
+              updateNotificationSetting('soundEnabled', value)
+            }
             trackColor={{false: '#D1D5DB', true: '#74BA1E'}}
             thumbColor="#FFFFFF"
-            disabled={!notificationsEnabled}
+            disabled={!notificationsEnabled || saving}
           />
         </View>
 
@@ -201,10 +466,12 @@ const ProfileScreen = ({navigation}: any) => {
           </View>
           <Switch
             value={vibrationEnabled}
-            onValueChange={setVibrationEnabled}
+            onValueChange={value =>
+              updateNotificationSetting('vibrationEnabled', value)
+            }
             trackColor={{false: '#D1D5DB', true: '#74BA1E'}}
             thumbColor="#FFFFFF"
-            disabled={!notificationsEnabled}
+            disabled={!notificationsEnabled || saving}
           />
         </View>
 
@@ -220,10 +487,12 @@ const ProfileScreen = ({navigation}: any) => {
           </View>
           <Switch
             value={voiceEnabled}
-            onValueChange={setVoiceEnabled}
+            onValueChange={value =>
+              updateNotificationSetting('voiceEnabled', value)
+            }
             trackColor={{false: '#D1D5DB', true: '#74BA1E'}}
             thumbColor="#FFFFFF"
-            disabled={!notificationsEnabled}
+            disabled={!notificationsEnabled || saving}
           />
         </View>
       </View>
@@ -255,11 +524,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
+    padding: 20,
   },
   loaderText: {
     marginTop: 12,
     fontSize: 16,
     color: '#6B7280',
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginTop: 16,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#74BA1E',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   header: {
     alignItems: 'center',
@@ -298,10 +592,120 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     gap: 8,
   },
+  disabledButton: {
+    opacity: 0.7,
+  },
   editButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#74BA1E',
+  },
+  statusCardSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 12,
+  },
+  statusCardError: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 12,
+  },
+  statusTextSuccess: {
+    fontSize: 14,
+    color: '#10B981',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  statusTextError: {
+    fontSize: 14,
+    color: '#EF4444',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 24, 39, 0.55)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  modalErrorCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  modalErrorText: {
+    fontSize: 14,
+    color: '#EF4444',
+    fontWeight: '600',
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  textInput: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  cancelButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingVertical: 14,
+    backgroundColor: '#F3F4F6',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  saveButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingVertical: 14,
+    backgroundColor: '#74BA1E',
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   statsContainer: {
     flexDirection: 'row',

@@ -15,13 +15,14 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
     ex.autolinkLibrariesFromCommand()
 }
 
-rootProject.name = "newproject"
+rootProject.name = "DVAGOSMR"
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
-        mavenCentral()
         google()
+        mavenCentral()
+        maven { url("$rootDir/../node_modules/@notifee/react-native/android/libs") }
     }
 }
 

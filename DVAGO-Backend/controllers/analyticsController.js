@@ -1,5 +1,4 @@
 const DoseLog = require("../models/DoseLog");
-const Medicine = require("../models/Medicine");
 
 const getAnalytics = async (req, res) => {
   try {
@@ -21,18 +20,68 @@ const getAnalytics = async (req, res) => {
       startDate.setHours(0, 0, 0, 0);
     }
 
+    console.log("[analytics] request", {
+      userId,
+      period,
+      startDate: startDate.toISOString(),
+      endDate: now.toISOString()
+    });
+
+    const isWithinAnalyticsRange = (date) => {
+      if (!date) return false;
+      const value = new Date(date);
+      return value >= startDate && value <= now;
+    };
+
+    const getAnalyticsDate = (log) =>
+      log.status === "taken" && log.takenAt ? log.takenAt : log.scheduledAt;
+
     const logs = await DoseLog.find({
       user: userId,
-      scheduledAt: { $gte: startDate, $lte: now }
+      $or: [
+        { scheduledAt: { $gte: startDate, $lte: now } },
+        { takenAt: { $gte: startDate, $lte: now } }
+      ]
     }).populate("medicine");
 
-    const totalDoses = logs.length;
-    const takenDoses = logs.filter(log => log.status === "taken").length;
+    const analyticsLogs = logs.filter((log) => {
+      if (log.status === "taken") {
+        return (
+          isWithinAnalyticsRange(log.takenAt) ||
+          isWithinAnalyticsRange(log.scheduledAt)
+        );
+      }
+
+      if (log.status === "missed") {
+        return isWithinAnalyticsRange(log.scheduledAt);
+      }
+
+      if (log.status === "pending") {
+        return (
+          new Date(log.scheduledAt) <= now &&
+          isWithinAnalyticsRange(log.scheduledAt)
+        );
+      }
+
+      return false;
+    });
+
+    const totalDoses = analyticsLogs.length;
+    const takenDoses = analyticsLogs.filter(log => log.status === "taken").length;
+    const missedDoses = analyticsLogs.filter(log => log.status === "missed").length;
+
+    console.log("[analytics] dose counts", {
+      userId,
+      period,
+      totalDoses,
+      takenDoses,
+      missedDoses
+    });
 
     const adherenceRate =
       totalDoses === 0 ? 0 : Math.round((takenDoses / totalDoses) * 100);
 
-    const onTimeDoses = logs.filter(log => {
+    const onTimeDoses = analyticsLogs.filter(log => {
       if (!log.takenAt) return false;
       const diffMinutes =
         Math.abs(new Date(log.takenAt) - new Date(log.scheduledAt)) / 60000;
@@ -46,8 +95,8 @@ const getAnalytics = async (req, res) => {
     let streak = 0;
     const groupedByDay = {};
 
-    logs.forEach(log => {
-      const day = new Date(log.scheduledAt).toISOString().split("T")[0];
+    analyticsLogs.forEach(log => {
+      const day = new Date(getAnalyticsDate(log)).toISOString().split("T")[0];
       if (!groupedByDay[day]) groupedByDay[day] = [];
       groupedByDay[day].push(log);
     });
@@ -64,8 +113,8 @@ const getAnalytics = async (req, res) => {
     // chart data
     const adherenceMap = {};
 
-    logs.forEach(log => {
-      const day = new Date(log.scheduledAt).toLocaleDateString("en-US", {
+    analyticsLogs.forEach(log => {
+      const day = new Date(getAnalyticsDate(log)).toLocaleDateString("en-US", {
         weekday: "short"
       });
 
@@ -88,7 +137,7 @@ const getAnalytics = async (req, res) => {
     // medicine breakdown
     const medicineMap = {};
 
-    logs.forEach(log => {
+    analyticsLogs.forEach(log => {
       const medName = log.medicine?.name || "Unknown";
 
       if (!medicineMap[medName]) {
@@ -119,8 +168,8 @@ const getAnalytics = async (req, res) => {
       Night: { taken: 0, total: 0 }
     };
 
-    logs.forEach(log => {
-      const hour = new Date(log.scheduledAt).getHours();
+    analyticsLogs.forEach(log => {
+      const hour = new Date(getAnalyticsDate(log)).getHours();
 
       let bucket = "Morning";
       if (hour >= 12 && hour < 17) bucket = "Afternoon";

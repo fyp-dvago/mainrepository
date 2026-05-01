@@ -18,7 +18,13 @@ const userSchema = new mongoose.Schema(
 
     password: {
       type: String,
-      required: true,
+    },
+
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
     },
 
     notifications: {
@@ -37,6 +43,57 @@ const userSchema = new mongoose.Schema(
       vibrationEnabled: {
         type: Boolean,
         default: true,
+      },
+    },
+
+    personalInformation: {
+      phone: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      dateOfBirth: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      gender: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      emergencyContact: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+    },
+
+    medicalHistory: {
+      bloodGroup: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      allergies: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      chronicConditions: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      pastSurgeries: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      currentDiseases: {
+        type: String,
+        trim: true,
+        default: "",
       },
     },
 

@@ -73,7 +73,8 @@ temp/
 .firebase/
 firebase-debug.log
 serviceAccountKey.json
-
+.env
+*.json
 # =========================
 # Docker (optional)
 # =========================

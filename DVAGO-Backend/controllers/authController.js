@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const admin = require('../config/firebaseAdmin');
 
 const generateToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
@@ -79,6 +80,13 @@ const loginUser = async (req, res) => {
       });
     }
 
+    if (!user.password) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password',
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
@@ -134,8 +142,72 @@ const getProfile = async (req, res) => {
   }
 };
 
+const firebaseAuth = async (req, res) => {
+  try {
+    const { idToken } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Firebase ID token is required',
+      });
+    }
+
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const firebaseUid = decoded.uid;
+    const email = decoded.email;
+    const name = decoded.name || decoded.displayName || email?.split('@')[0];
+
+    if (!firebaseUid || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Firebase token must include uid and email',
+      });
+    }
+
+    let user = await User.findOne({
+      $or: [{ firebaseUid }, { email }],
+    });
+
+    if (!user) {
+      user = await User.create({
+        name: name || 'User',
+        email,
+        firebaseUid,
+      });
+    } else if (!user.firebaseUid) {
+      user.firebaseUid = firebaseUid;
+      if (!user.name && name) {
+        user.name = name;
+      }
+      await user.save();
+    }
+
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Firebase login successful',
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        firebaseUid: user.firebaseUid,
+      },
+    });
+  } catch (error) {
+    console.error('Firebase auth error:', error.message);
+    res.status(401).json({
+      success: false,
+      message: 'Invalid Firebase token',
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getProfile,
+  firebaseAuth,
 };

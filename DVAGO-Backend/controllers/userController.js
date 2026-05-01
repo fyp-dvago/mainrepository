@@ -39,6 +39,19 @@ const getProfile = async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        personalInformation: {
+          phone: user.personalInformation?.phone || "",
+          dateOfBirth: user.personalInformation?.dateOfBirth || "",
+          gender: user.personalInformation?.gender || "",
+          emergencyContact: user.personalInformation?.emergencyContact || "",
+        },
+        medicalHistory: {
+          bloodGroup: user.medicalHistory?.bloodGroup || "",
+          allergies: user.medicalHistory?.allergies || "",
+          chronicConditions: user.medicalHistory?.chronicConditions || "",
+          pastSurgeries: user.medicalHistory?.pastSurgeries || "",
+          currentDiseases: user.medicalHistory?.currentDiseases || "",
+        },
       },
       stats: {
         medicines: totalMedicines,
@@ -67,7 +80,7 @@ const getProfile = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { name, email } = req.body;
+    const { name, email, personalInformation, medicalHistory } = req.body;
 
     const user = await User.findById(userId);
 
@@ -79,6 +92,20 @@ const updateProfile = async (req, res) => {
 
     if (name !== undefined) user.name = name;
     if (email !== undefined) user.email = email;
+    if (personalInformation) {
+      user.personalInformation = {
+        ...user.personalInformation?.toObject?.(),
+        ...user.personalInformation,
+        ...personalInformation,
+      };
+    }
+    if (medicalHistory) {
+      user.medicalHistory = {
+        ...user.medicalHistory?.toObject?.(),
+        ...user.medicalHistory,
+        ...medicalHistory,
+      };
+    }
 
     await user.save();
 
@@ -88,6 +115,19 @@ const updateProfile = async (req, res) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+        personalInformation: {
+          phone: user.personalInformation?.phone || "",
+          dateOfBirth: user.personalInformation?.dateOfBirth || "",
+          gender: user.personalInformation?.gender || "",
+          emergencyContact: user.personalInformation?.emergencyContact || "",
+        },
+        medicalHistory: {
+          bloodGroup: user.medicalHistory?.bloodGroup || "",
+          allergies: user.medicalHistory?.allergies || "",
+          chronicConditions: user.medicalHistory?.chronicConditions || "",
+          pastSurgeries: user.medicalHistory?.pastSurgeries || "",
+          currentDiseases: user.medicalHistory?.currentDiseases || "",
+        },
       },
     });
   } catch (error) {

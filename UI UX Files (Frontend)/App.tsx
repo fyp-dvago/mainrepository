@@ -1,13 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {
-  StatusBar,
-  Platform,
-  PermissionsAndroid,
-} from 'react-native';
-
-// import notifee, {AndroidImportance} from '@notifee/react-native';
+import {StatusBar} from 'react-native';
 
 import SplashScreen from './src/screens/SplashScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
@@ -16,36 +10,13 @@ import MainTabs from './src/navigation/MainTabs';
 import AddMedicineScreen from './src/screens/AddMedicineScreen';
 import MedicineDetailScreen from './src/screens/MedicineDetailScreen';
 import ScanMedicineScreen from './src/screens/ScanMedicineScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
+import PersonalInformationScreen from './src/screens/PersonalInformationScreen';
+import MedicalHistoryScreen from './src/screens/MedicalHistoryScreen';
 import {getStoredToken} from './src/services/authService';
+import {initializeMedicineNotifications} from './src/services/notificationService';
 
 const Stack = createNativeStackNavigator();
-
-// async function createNotificationChannel() {
-//   if (Platform.OS === 'android') {
-//     await notifee.createChannel({
-//       id: 'medicine-reminders',
-//       name: 'Medicine Reminders',
-//       importance: AndroidImportance.HIGH,
-//     });
-//   }
-// }
-
-// async function requestNotificationPermission() {
-//   if (Platform.OS === 'android' && Platform.Version >= 33) {
-//     try {
-//       const granted = await PermissionsAndroid.request(
-//         PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-//       );
-//       if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-//         console.log('Notification permission granted');
-//       } else {
-//         console.log('Notification permission denied');
-//       }
-//     } catch (err) {
-//       console.warn('Notification permission error:', err);
-//     }
-//   }
-// }
 
 function App(): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(true);
@@ -54,8 +25,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-        // await createNotificationChannel();
-        // await requestNotificationPermission();
+        await initializeMedicineNotifications();
 
         const token = await getStoredToken();
 
@@ -127,6 +97,36 @@ function App(): React.JSX.Element {
           options={{
             headerShown: true,
             title: 'Scan Medicine',
+            headerStyle: {backgroundColor: '#74BA1E'},
+            headerTintColor: '#FFFFFF',
+          }}
+        />
+
+        <Stack.Screen
+          name="Notifications"
+          component={NotificationsScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+
+        <Stack.Screen
+          name="PersonalInformation"
+          component={PersonalInformationScreen}
+          options={{
+            headerShown: true,
+            title: 'Personal Information',
+            headerStyle: {backgroundColor: '#74BA1E'},
+            headerTintColor: '#FFFFFF',
+          }}
+        />
+
+        <Stack.Screen
+          name="MedicalHistory"
+          component={MedicalHistoryScreen}
+          options={{
+            headerShown: true,
+            title: 'Medical History',
             headerStyle: {backgroundColor: '#74BA1E'},
             headerTintColor: '#FFFFFF',
           }}

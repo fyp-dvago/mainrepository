@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "228483353260",
+    "project_id": "dvago-smr",
+    "storage_bucket": "dvago-smr.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:228483353260:android:34168517e4c2e18aba6d09",
+        "android_client_info": {
+          "package_name": "com.dvago.smr"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "228483353260-s4t7lf0nu8anc48143tifiadieqf4ddo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.dvago.smr",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "228483353260-krhsad7lullk4kj8smsdev1s7r1qjbp4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHCVKmIlSUwhj8NDqDgsDrGApyQQCUsI4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "228483353260-krhsad7lullk4kj8smsdev1s7r1qjbp4.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

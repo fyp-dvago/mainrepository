@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   View,
   Text,
@@ -6,80 +6,93 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import api from '../services/apiClient';
+
+type Medicine = {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  stock: number;
+  nextDose: string;
+  color: string;
+  category: string;
+  isActive: boolean;
+};
+
+const frequencyLabels: Record<string, string> = {
+  once: 'Once daily',
+  twice: 'Twice daily',
+  thrice: 'Thrice daily',
+  four: '4 times daily',
+};
+
+const mapMedicine = (medicine: any): Medicine => ({
+  id: medicine._id || medicine.id,
+  name: medicine.name || '',
+  dosage: medicine.dosage || '',
+  frequency:
+    frequencyLabels[medicine.frequency] || medicine.frequency || 'Once daily',
+  stock: Number(medicine.stock || 0),
+  nextDose:
+    Array.isArray(medicine.times) && medicine.times.length > 0
+      ? medicine.times[0]
+      : 'No reminder',
+  color: medicine.color || '#74BA1E',
+  category: medicine.category || 'Medicine',
+  isActive: medicine.isActive !== false,
+});
 
 const MedicinesScreen = ({navigation}: any) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const medicines = [
-    {
-      id: '1',
-      name: 'Paracetamol',
-      dosage: '500mg',
-      frequency: 'Twice daily',
-      stock: 20,
-      nextDose: '6:00 PM',
-      color: '#3B82F6',
-      category: 'Pain Relief',
-    },
-    {
-      id: '2',
-      name: 'Amoxicillin',
-      dosage: '250mg',
-      frequency: '3 times daily',
-      stock: 15,
-      nextDose: '4:30 PM',
-      color: '#EF4444',
-      category: 'Antibiotic',
-    },
-    {
-      id: '3',
-      name: 'Vitamin D',
-      dosage: '1000 IU',
-      frequency: 'Once daily',
-      stock: 30,
-      nextDose: 'Tomorrow 9:00 AM',
-      color: '#F59E0B',
-      category: 'Vitamin',
-    },
-    {
-      id: '4',
-      name: 'Omeprazole',
-      dosage: '20mg',
-      frequency: 'Once daily',
-      stock: 8,
-      nextDose: '8:00 PM',
-      color: '#8B5CF6',
-      category: 'Digestive',
-    },
-    {
-      id: '5',
-      name: 'Aspirin',
-      dosage: '75mg',
-      frequency: 'Once daily',
-      stock: 25,
-      nextDose: 'Tomorrow 9:00 AM',
-      color: '#EC4899',
-      category: 'Blood Thinner',
-    },
-    {
-      id: '6',
-      name: 'Cetirizine',
-      dosage: '10mg',
-      frequency: 'Once daily',
-      stock: 18,
-      nextDose: 'Tomorrow 10:00 AM',
-      color: '#10B981',
-      category: 'Antihistamine',
-    },
-  ];
+  const loadMedicines = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+
+      const response = await api.get('/medicines');
+      const data = Array.isArray(response.data) ? response.data : [];
+
+      setMedicines(data.map(mapMedicine));
+    } catch (requestError: any) {
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          'Unable to load medicines',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMedicines();
+
+    const unsubscribe = navigation.addListener('focus', loadMedicines);
+
+    return unsubscribe;
+  }, [loadMedicines, navigation]);
 
   const filters = [
     {id: 'all', label: 'All', count: medicines.length},
-    {id: 'active', label: 'Active', count: medicines.length},
-    {id: 'low', label: 'Low Stock', count: 1},
+    {
+      id: 'active',
+      label: 'Active',
+      count: medicines.filter(medicine => medicine.isActive).length,
+    },
+    {
+      id: 'low',
+      label: 'Low Stock',
+      count: medicines.filter(medicine => medicine.stock < 10).length,
+    },
   ];
 
   const filteredMedicines = medicines.filter((medicine) => {
@@ -88,6 +101,7 @@ const MedicinesScreen = ({navigation}: any) => {
       .includes(searchQuery.toLowerCase());
     const matchesFilter =
       activeFilter === 'all' ||
+      (activeFilter === 'active' && medicine.isActive) ||
       (activeFilter === 'low' && medicine.stock < 10);
     return matchesSearch && matchesFilter;
   });
@@ -106,7 +120,12 @@ const MedicinesScreen = ({navigation}: any) => {
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Icon name="magnify" size={20} color="#9CA3AF" style={styles.searchIcon} />
+        <Icon
+          name="magnify"
+          size={20}
+          color="#9CA3AF"
+          style={styles.searchIcon}
+        />
         <TextInput
           style={styles.searchInput}
           placeholder="Search medicines..."
@@ -163,67 +182,85 @@ const MedicinesScreen = ({navigation}: any) => {
       <ScrollView
         style={styles.listContainer}
         showsVerticalScrollIndicator={false}>
-        {filteredMedicines.map((medicine) => (
-          <TouchableOpacity
-            key={medicine.id}
-            style={styles.medicineCard}
-            onPress={() =>
-              navigation.navigate('MedicineDetail', {medicine})
-            }>
-            <View
-              style={[
-                styles.medicineColorBar,
-                {backgroundColor: medicine.color},
-              ]}
-            />
-            <View style={styles.medicineContent}>
-              <View style={styles.medicineHeader}>
-                <View style={styles.medicineInfo}>
-                  <Text style={styles.medicineName}>{medicine.name}</Text>
-                  <Text style={styles.medicineDosage}>{medicine.dosage}</Text>
-                </View>
-                <View
-                  style={[
-                    styles.stockBadge,
-                    medicine.stock < 10 && styles.lowStockBadge,
-                  ]}>
-                  <Icon
-                    name="package-variant"
-                    size={14}
-                    color={medicine.stock < 10 ? '#EF4444' : '#74BA1E'}
-                  />
-                  <Text
+        {loading && (
+          <View style={styles.stateContainer}>
+            <ActivityIndicator size="large" color="#74BA1E" />
+            <Text style={styles.stateText}>Loading medicines...</Text>
+          </View>
+        )}
+
+        {!loading && error && (
+          <View style={styles.emptyState}>
+            <Icon name="alert-circle-outline" size={64} color="#EF4444" />
+            <Text style={styles.emptyText}>Could not load medicines</Text>
+            <Text style={styles.emptySubtext}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={loadMedicines}>
+              <Text style={styles.retryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {!loading &&
+          !error &&
+          filteredMedicines.map(medicine => (
+            <TouchableOpacity
+              key={medicine.id}
+              style={styles.medicineCard}
+              onPress={() => navigation.navigate('MedicineDetail', {medicine})}>
+              <View
+                style={[
+                  styles.medicineColorBar,
+                  {backgroundColor: medicine.color},
+                ]}
+              />
+              <View style={styles.medicineContent}>
+                <View style={styles.medicineHeader}>
+                  <View style={styles.medicineInfo}>
+                    <Text style={styles.medicineName}>{medicine.name}</Text>
+                    <Text style={styles.medicineDosage}>{medicine.dosage}</Text>
+                  </View>
+                  <View
                     style={[
-                      styles.stockText,
-                      medicine.stock < 10 && styles.lowStockText,
+                      styles.stockBadge,
+                      medicine.stock < 10 && styles.lowStockBadge,
                     ]}>
-                    {medicine.stock}
+                    <Icon
+                      name="package-variant"
+                      size={14}
+                      color={medicine.stock < 10 ? '#EF4444' : '#74BA1E'}
+                    />
+                    <Text
+                      style={[
+                        styles.stockText,
+                        medicine.stock < 10 && styles.lowStockText,
+                      ]}>
+                      {medicine.stock}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.medicineDetails}>
+                  <View style={styles.detailItem}>
+                    <Icon name="clock-outline" size={16} color="#6B7280" />
+                    <Text style={styles.detailText}>{medicine.frequency}</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Icon name="tag-outline" size={16} color="#6B7280" />
+                    <Text style={styles.detailText}>{medicine.category}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.nextDoseContainer}>
+                  <Icon name="bell-outline" size={16} color="#74BA1E" />
+                  <Text style={styles.nextDoseText}>
+                    Next: {medicine.nextDose}
                   </Text>
                 </View>
               </View>
+            </TouchableOpacity>
+          ))}
 
-              <View style={styles.medicineDetails}>
-                <View style={styles.detailItem}>
-                  <Icon name="clock-outline" size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>{medicine.frequency}</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Icon name="tag-outline" size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>{medicine.category}</Text>
-                </View>
-              </View>
-
-              <View style={styles.nextDoseContainer}>
-                <Icon name="bell-outline" size={16} color="#74BA1E" />
-                <Text style={styles.nextDoseText}>
-                  Next: {medicine.nextDose}
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        ))}
-
-        {filteredMedicines.length === 0 && (
+        {!loading && !error && filteredMedicines.length === 0 && (
           <View style={styles.emptyState}>
             <Icon name="pill-off" size={64} color="#E5E7EB" />
             <Text style={styles.emptyText}>No medicines found</Text>
@@ -294,36 +331,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1F2937',
   },
-  filtersContainer: {
-    marginBottom: 16,
-  },
-  filtersContent: {
-    paddingHorizontal: 20,
-    gap: 12,
-  },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    gap: 8,
-  },
-  filterButtonActive: {
-    backgroundColor: '#74BA1E',
-    borderColor: '#74BA1E',
-  },
-  filterText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  filterTextActive: {
-    color: '#FFFFFF',
-  },
+filtersContainer: {
+  marginHorizontal: 20,
+  marginTop: 0,
+  marginBottom: 16,
+  maxHeight: 48,
+  flexGrow: 0,
+},
+
+filtersContent: {
+  flexDirection: 'row',
+  backgroundColor: '#FFFFFF',
+  padding: 4,
+  borderRadius: 12,
+  gap: 8,
+},
+
+filterButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingHorizontal: 14,
+  paddingVertical: 10,
+  borderRadius: 8,
+  gap: 8,
+},
+
+filterButtonActive: {
+  backgroundColor: '#74BA1E',
+},
+
+filterText: {
+  fontSize: 14,
+  fontWeight: '600',
+  color: '#6B7280',
+},
+
+filterTextActive: {
+  color: '#FFFFFF',
+},
   filterBadge: {
     backgroundColor: '#F3F4F6',
     paddingHorizontal: 8,
@@ -346,6 +392,16 @@ const styles = StyleSheet.create({
   listContainer: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  stateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  stateText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginTop: 12,
   },
   medicineCard: {
     backgroundColor: '#FFFFFF',
@@ -448,6 +504,18 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     marginTop: 8,
     textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#74BA1E',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   fab: {
     position: 'absolute',
