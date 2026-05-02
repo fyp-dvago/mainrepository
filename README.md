@@ -1,4 +1,4 @@
-# DVAGO-SMR
+# DVAGO Smart Health Reminder
 
 DVAGO-SMR is a Smart Medicine Reminder System built with a React Native mobile app and a Node.js/Express backend. It helps users manage medicines, schedule local reminder notifications, track dose adherence, scan medicine labels with OCR, and maintain a basic health profile.
 
